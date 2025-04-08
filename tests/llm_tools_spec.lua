@@ -126,12 +126,16 @@ describe("llm_tools", function()
 
   describe("grep", function()
     local original_exepath = vim.fn.exepath
-    local original_system = vim.fn.system
-    local original_systemlist = vim.fn.systemlist
-    local original_jobstart = vim.fn.jobstart
-    local original_jobwait = vim.fn.jobwait
 
-    before_each(function()
+    after_each(function() vim.fn.exepath = original_exepath end)
+
+    it("should search using ripgrep when available", function()
+      -- Mock exepath to return rg path
+      vim.fn.exepath = function(cmd)
+        if cmd == "rg" then return "/usr/bin/rg" end
+        return ""
+      end
+
       -- Create a test file with searchable content
       local file = io.open(test_dir .. "/searchable.txt", "w")
       if not file then error("Failed to create test file") end
@@ -142,28 +146,6 @@ describe("llm_tools", function()
       if not file then error("Failed to create test file") end
       file:write("this is nothing")
       file:close()
-
-      -- Create a test file specifically for ag
-      file = io.open(test_dir .. "/ag_test.txt", "w")
-      if not file then error("Failed to create test file") end
-      file:write("content for ag test")
-      file:close()
-    end)
-
-    after_each(function()
-      vim.fn.exepath = original_exepath
-      vim.fn.system = original_system
-      vim.fn.systemlist = original_systemlist
-      vim.fn.jobstart = original_jobstart
-      vim.fn.jobwait = original_jobwait
-    end)
-
-    it("should search using ripgrep when available", function()
-      -- Mock exepath to return rg path
-      vim.fn.exepath = function(cmd)
-        if cmd == "rg" then return "/usr/bin/rg" end
-        return ""
-      end
 
       local result, err = grep({ rel_path = ".", query = "Searchable", case_sensitive = false })
       assert.is_nil(err)
@@ -197,97 +179,22 @@ describe("llm_tools", function()
     end)
 
     it("should search using ag when rg is not available", function()
-      -- Let's look at the grep.lua implementation first
-      local grep_file_path = os.getenv("HOME") .. "/.local/share/nvim/lazy/avante.nvim/lua/avante/llm_tools/grep.lua"
-      local grep_file = io.open(grep_file_path, "r")
-
-      -- If we can't read the implementation, let's create a manual mock
-      local use_manual_mock = true
-      if grep_file then
-        local content = grep_file:read("*a")
-        grep_file:close()
-
-        -- If the implementation is using jobstart/system for ag, mock accordingly
-        if content:find("jobstart") and content:find("ag") then
-          use_manual_mock = false
-
-          -- First, mock exepath to disable rg and enable ag
-          vim.fn.exepath = function(cmd)
-            if cmd == "ag" then return "/usr/bin/ag" end
-            if cmd == "rg" then return "" end
-            return ""
-          end
-
-          -- Mock jobstart for ag commands
-          vim.fn.jobstart = function(cmd, opts)
-            if type(cmd) == "table" and cmd[1] == "ag" then
-              -- Call on_stdout callback with our mock output
-              if opts and opts.on_stdout then
-                opts.on_stdout(0, {test_dir .. "/ag_test.txt:1:content for ag test"}, 0)
-              end
-              return 123 -- Return a fake job id
-            end
-            return original_jobstart(cmd, opts)
-          end
-
-          -- Mock jobwait to return success for our fake job
-          vim.fn.jobwait = function(jobs, timeout)
-            for _, job_id in ipairs(jobs) do
-              if job_id == 123 then
-                return {{123, 0}} -- Success exit code
-              end
-            end
-            return original_jobwait(jobs, timeout)
-          end
-        end
+      -- Mock exepath to return ag path
+      vim.fn.exepath = function(cmd)
+        if cmd == "ag" then return "/usr/bin/ag" end
+        return ""
       end
 
-      -- If we couldn't read the file or it doesn't use jobstart, use a system mock
-      if use_manual_mock then
-        -- Mock exepath to disable rg and enable ag
-        vim.fn.exepath = function(cmd)
-          if cmd == "ag" then return "/usr/bin/ag" end
-          if cmd == "rg" then return "" end
-          return ""
-        end
+      -- Create a test file specifically for ag
+      local file = io.open(test_dir .. "/ag_test.txt", "w")
+      if not file then error("Failed to create test file") end
+      file:write("content for ag test")
+      file:close()
 
-        -- Mock system for ag commands
-        vim.fn.system = function(cmd)
-          if type(cmd) == "table" and cmd[1] == "ag" then
-            return test_dir .. "/ag_test.txt:1:content for ag test\n"
-          end
-          -- For shell-command check
-          return original_system(cmd)
-        end
-
-        -- Mock systemlist for ag commands
-        vim.fn.systemlist = function(cmd)
-          if type(cmd) == "table" and cmd[1] == "ag" then
-            return {test_dir .. "/ag_test.txt:1:content for ag test"}
-          end
-          return original_systemlist(cmd)
-        end
-      end
-
-      -- Now run the test
       local result, err = grep({ rel_path = ".", query = "ag test" })
-
-      -- Debug output
-      print("AG TEST RESULT:", vim.inspect(result))
-      print("AG TEST ERROR:", vim.inspect(err))
-
-      -- Assertions
       assert.is_nil(err)
       assert.is_string(result)
-
-      -- Create a more forgiving assertion
-      if not result:find("ag_test.txt") then
-        print("EXPECTED TO FIND: ag_test.txt")
-        print("ACTUAL RESULT:", result)
-        assert.truthy(result:find("content for ag test"))
-      else
-        assert.truthy(result:find("ag_test.txt"))
-      end
+      assert.truthy(result:find("ag_test.txt"))
     end)
 
     it("should search using grep when rg and ag are not available", function()
@@ -296,6 +203,17 @@ describe("llm_tools", function()
         if cmd == "grep" then return "/usr/bin/grep" end
         return ""
       end
+
+      -- Create a test file with searchable content
+      local file = io.open(test_dir .. "/searchable.txt", "w")
+      if not file then error("Failed to create test file") end
+      file:write("this is searchable content")
+      file:close()
+
+      file = io.open(test_dir .. "/nothing.txt", "w")
+      if not file then error("Failed to create test file") end
+      file:write("this is nothing")
+      file:close()
 
       local result, err = grep({ rel_path = ".", query = "Searchable", case_sensitive = false })
       assert.is_nil(err)
