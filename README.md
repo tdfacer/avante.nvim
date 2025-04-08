@@ -772,6 +772,26 @@ Therefore, I have adopted Cursor’s method to implement planning applying. For 
 
 Avante provides a RAG service, which is a tool for obtaining the required context for the AI to generate the codes. By default, it is not enabled. You can enable it this way:
 
+Curl:
+```bash
+while true; do
+curl localhost:20250/api/v1/resources | jq .
+sleep 10
+done
+
+
+    query: str = Field(..., description="The query text to search for in the indexed documents")
+    base_uri: str = Field(..., description="The base URI to search in")
+    top_k: int | None = Field(5, description="Number of top results to return", ge=1, le=20)
+
+
+curl -XPOST http://localhost:20250/api/v1/retrieve -d '{
+  "query": "Which database is used for this service?",
+  "base_uri": "file:///host2/fitness-plan/",
+  "top_k": 5
+}' | jq .
+```
+
 ```lua
 rag_service = {
   enabled = false, -- Enables the RAG service
