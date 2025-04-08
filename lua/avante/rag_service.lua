@@ -9,7 +9,7 @@ local M = {}
 local container_name = "avante-rag-service"
 local service_path = "/tmp/" .. container_name
 
-function M.get_rag_service_image() return "quay.io/yetoneful/avante-rag-service:0.0.10" end
+function M.get_rag_service_image() return "quay.io/yetoneful/avante-rag-service-trevor:0.0.11" end
 
 function M.get_rag_service_port() return 20250 end
 
@@ -38,14 +38,21 @@ function M.get_rag_service_runner() return (Config.rag_service and Config.rag_se
 function M.get_host_mounts()
   local mounts = Config.rag_service.host_mounts or {}
 
-  -- For backward compatibility, include original host_mount if it exists
-  if Config.rag_service.host_mount and Config.rag_service.host_mount ~= "" then
+  -- Only include original host_mount if host_mounts is empty
+  if #mounts == 0 and Config.rag_service.host_mount and Config.rag_service.host_mount ~= "" then
     table.insert(mounts, Config.rag_service.host_mount)
   end
 
-  -- Fallback to HOME if no mounts are specified
+  -- Fallback to HOME if no mounts are specified at all
   if #mounts == 0 then
     table.insert(mounts, os.getenv("HOME"))
+  end
+
+  -- Expand tilde in paths
+  for i, mount in ipairs(mounts) do
+    if mount:sub(1, 1) == "~" then
+      mounts[i] = os.getenv("HOME") .. mount:sub(2)
+    end
   end
 
   return mounts

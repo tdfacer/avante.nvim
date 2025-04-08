@@ -583,7 +583,7 @@ def get_gitcrypt_files(directory: Path) -> list[str]:
         return git_crypt_patterns
 
     try:
-        # Find git root directory
+        # Find git root directory - without the problematic flag
         git_root_cmd = subprocess.run(
             [git_executable, "-C", str(directory), "rev-parse", "--show-toplevel"],
             capture_output=True,
@@ -600,7 +600,7 @@ def get_gitcrypt_files(directory: Path) -> list[str]:
         # Get relative path from git root to our directory
         rel_path = directory.relative_to(git_root) if directory != git_root else Path()
 
-        # Execute git commands separately and pipe the results
+        # Execute git commands separately and pipe the results - without the problematic flag
         git_ls_files = subprocess.run(
             [git_executable, "-C", str(git_root), "ls-files", "-z"],
             capture_output=True,
@@ -611,7 +611,7 @@ def get_gitcrypt_files(directory: Path) -> list[str]:
         if git_ls_files.returncode != 0:
             return git_crypt_patterns
 
-        # Use Python to process the output instead of xargs, grep, and cut
+        # Use Python to process the output - without the problematic flag
         git_check_attr = subprocess.run(
             [git_executable, "-C", str(git_root), "check-attr", "filter", "--stdin", "-z"],
             input=git_ls_files.stdout,
