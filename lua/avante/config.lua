@@ -38,6 +38,7 @@ M._defaults = {
   rag_service = {
     enabled = false, -- Enables the rag service, requires OPENAI_API_KEY to be set
     host_mount = os.getenv("HOME"), -- Host mount path for the rag service (docker will mount this path)
+    host_mounts = {}, -- New option: List of paths to mount
     runner = "docker", -- The runner for the rag service, (can use docker, or nix)
     provider = "openai", -- The provider to use for RAG service. eg: openai or ollama
     llm_model = "", -- The LLM model to use for RAG service

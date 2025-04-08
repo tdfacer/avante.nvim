@@ -775,7 +775,10 @@ Avante provides a RAG service, which is a tool for obtaining the required contex
 ```lua
 rag_service = {
   enabled = false, -- Enables the RAG service
-  host_mount = os.getenv("HOME"), -- Host mount path for the rag service
+  host_mounts = {
+    os.getenv("HOME"),  -- Mount your home directory
+    "/data/code",       -- Mount another directory
+  },
   provider = "openai", -- The provider to use for RAG service (e.g. openai or ollama)
   llm_model = "", -- The LLM model to use for RAG service
   embed_model = "", -- The embedding model to use for RAG service
@@ -783,22 +786,25 @@ rag_service = {
 },
 ```
 
-If your rag_service provider is `openai`, then you need to set the `OPENAI_API_KEY` environment variable!
+> **Note:** For backward compatibility, you can still use the `host_mount` option with a single path, but using `host_mounts` is recommended for future-proofing your configuration.
 
-If your rag_service provider is `ollama`, you need to set the endpoint to `http://localhost:11434` (note there is no `/v1` at the end) or any address of your own ollama server.
+If your rag_service provider is openai, then you need to set the OPENAI_API_KEY environment variable!
 
-If your rag_service provider is `ollama`, when `llm_model` is empty, it defaults to `llama3`, and when `embed_model` is empty, it defaults to `nomic-embed-text`. Please make sure these models are available in your ollama server.
+If your rag_service provider is ollama, you need to set the endpoint to http://localhost:11434 (note there is no /v1 at the end) or any address of your own ollama server.
+
+If your rag_service provider is ollama, when llm_model is empty, it defaults to llama3, and when embed_model is empty, it defaults to nomic-embed-text. Please make sure these models are available in your ollama server.
 
 Additionally, RAG Service also depends on Docker! (For macOS users, OrbStack is recommended as a Docker alternative).
 
-`host_mount` is the path that will be mounted to the container, and the default is the home directory. The mount is required
-for the RAG service to access the files in the host machine. It is up to the user to decide if you want to mount the whole
-`/` directory, just the project directory, or the home directory. If you plan using avante and RAG event for projects
-stored outside your home directory, you will need to set the `host_mount` to the root directory of your file system.
+The `host_mounts` option specifies the directories that will be mounted to the container. By default, only your home directory is mounted. Each mounted directory will be accessible in read-only mode.
 
-The mount will be read only.
+**Why do you need multiple mounts?** If you have code stored in different places on your filesystem (like `/home/user/code` and `/data/code`), you can mount both to make all your code accessible to the RAG service.
 
-After changing the rag_service configuration, you need to manually delete the rag_service container to ensure the new configuration is used: `docker rm -fv avante-rag-service`
+After changing the rag_service configuration, you need to manually delete the rag_service container to ensure the new configuration is used:
+
+```bash
+docker rm -fv avante-rag-service
+```
 
 ## Web Search Engines
 
