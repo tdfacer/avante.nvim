@@ -1,3 +1,4 @@
+-- Modified rag_service.lua to support multiple host mounts
 local curl = require("plenary.curl")
 local Path = require("plenary.path")
 local Config = require("avante.config")
@@ -32,6 +33,35 @@ function M.get_current_image()
 end
 
 function M.get_rag_service_runner() return (Config.rag_service and Config.rag_service.runner) or "docker" end
+
+-- Helper to get host_mounts as a list
+function M.get_host_mounts()
+  local mounts = Config.rag_service.host_mounts or {}
+
+  -- For backward compatibility, include original host_mount if it exists
+  if Config.rag_service.host_mount and Config.rag_service.host_mount ~= "" then
+    table.insert(mounts, Config.rag_service.host_mount)
+  end
+
+  -- Fallback to HOME if no mounts are specified
+  if #mounts == 0 then
+    table.insert(mounts, os.getenv("HOME"))
+  end
+
+  return mounts
+end
+
+-- Creates Docker volume mount arguments for all host mounts
+function M.get_docker_mount_args()
+  local mounts = M.get_host_mounts()
+  local mount_args = ""
+
+  for i, mount in ipairs(mounts) do
+    mount_args = mount_args .. string.format(" -v %s:/host%d:ro", mount, i)
+  end
+
+  return mount_args
+end
 
 ---@param cb fun()
 function M.launch_rag_service(cb)
@@ -73,11 +103,15 @@ function M.launch_rag_service(cb)
       Utils.info(string.format("container %s already started but not running, stopping...", container_name))
       M.stop_rag_service()
     end
+
+    -- Get mount arguments for all host mounts
+    local mount_args = M.get_docker_mount_args()
+
     local cmd_ = string.format(
-      "docker run -d --network=host --name %s -v %s:/data -v %s:/host:ro -e ALLOW_RESET=TRUE -e DATA_DIR=/data -e RAG_PROVIDER=%s -e %s_API_KEY=%s -e %s_API_BASE=%s -e RAG_LLM_MODEL=%s -e RAG_EMBED_MODEL=%s %s %s",
+      "docker run -d --network=host --name %s -v %s:/data %s -e ALLOW_RESET=TRUE -e DATA_DIR=/data -e RAG_PROVIDER=%s -e %s_API_KEY=%s -e %s_API_BASE=%s -e RAG_LLM_MODEL=%s -e RAG_EMBED_MODEL=%s %s %s",
       container_name,
       data_path,
-      Config.rag_service.host_mount,
+      mount_args,
       Config.rag_service.provider,
       Config.rag_service.provider:upper(),
       openai_api_key,
@@ -100,6 +134,8 @@ function M.launch_rag_service(cb)
       end,
     })
   elseif M.get_rag_service_runner() == "nix" then
+    -- For Nix runner, we would need to implement similar multi-mount handling
+    -- This would involve modifying environment variables or setup scripts
     -- Check if service is already running
     local check_cmd = string.format("pgrep -f '%s'", service_path)
     local check_result = vim.fn.system(check_cmd)
@@ -110,13 +146,17 @@ function M.launch_rag_service(cb)
     end
 
     local dirname =
-      Utils.trim(string.sub(debug.getinfo(1).source, 2, #"/lua/avante/rag_service.lua" * -1), { suffix = "/" })
+        Utils.trim(string.sub(debug.getinfo(1).source, 2, #"/lua/avante/rag_service.lua" * -1), { suffix = "/" })
     local rag_service_dir = dirname .. "/py/rag-service"
 
     Utils.debug(string.format("launching %s with nix...", container_name))
 
+    -- We'll need to implement host mounts via environment variables for the nix runner
+    -- This is a simplification; actual implementation would need to handle multiple mounts
+    local mounts_json = vim.json.encode(M.get_host_mounts())
+
     local cmd = string.format(
-      "cd %s && ALLOW_RESET=TRUE PORT=%d DATA_DIR=%s RAG_PROVIDER=%s %s_API_KEY=%s %s_API_BASE=%s RAG_LLM_MODEL=%s RAG_EMBED_MODEL=%s sh run.sh %s",
+      "cd %s && ALLOW_RESET=TRUE PORT=%d DATA_DIR=%s RAG_PROVIDER=%s %s_API_KEY=%s %s_API_BASE=%s RAG_LLM_MODEL=%s RAG_EMBED_MODEL=%s HOST_MOUNTS='%s' sh run.sh %s",
       rag_service_dir,
       port,
       service_path,
@@ -127,6 +167,7 @@ function M.launch_rag_service(cb)
       Config.rag_service.endpoint,
       Config.rag_service.llm_model,
       Config.rag_service.embed_model,
+      mounts_json,
       service_path
     )
 
@@ -182,27 +223,47 @@ function M.get_scheme(uri)
   return scheme
 end
 
+-- Updated to handle multiple host mounts
 function M.to_container_uri(uri)
   local runner = M.get_rag_service_runner()
   if runner == "nix" then return uri end
+
   local scheme = M.get_scheme(uri)
   if scheme == "file" then
     local path = uri:match("^file://(.*)$")
-    local host_dir = Config.rag_service.host_mount
-    if path:sub(1, #host_dir) == host_dir then path = "/host" .. path:sub(#host_dir + 1) end
-    uri = string.format("file://%s", path)
+    local mounts = M.get_host_mounts()
+
+    -- Try to match with each mount point
+    for i, mount in ipairs(mounts) do
+      if path:sub(1, #mount) == mount then
+        local container_path = string.format("/host%d%s", i, path:sub(#mount + 1))
+        return string.format("file://%s", container_path)
+      end
+    end
   end
+
   return uri
 end
 
+-- Updated to handle multiple host mounts
 function M.to_local_uri(uri)
   local scheme = M.get_scheme(uri)
-  local path = uri:match("^file:///host(.*)$")
 
-  if scheme == "file" and path ~= nil then
-    local host_dir = Config.rag_service.host_mount
-    local full_path = Path:new(host_dir):joinpath(path:sub(2)):absolute()
-    uri = string.format("file://%s", full_path)
+  -- Check if this is a container path from any of our mounts
+  if scheme == "file" then
+    local mounts = M.get_host_mounts()
+
+    -- Try to match with each mount point in container
+    for i = 1, #mounts do
+      local host_pattern = string.format("^file:///host%d(/.*)$", i)
+      local rel_path = uri:match(host_pattern)
+
+      if rel_path ~= nil then
+        local host_dir = mounts[i]
+        local full_path = Path:new(host_dir):joinpath(rel_path:sub(2)):absolute()
+        return string.format("file://%s", full_path)
+      end
+    end
   end
 
   return uri
@@ -320,12 +381,12 @@ function M.retrieve(base_uri, query)
   end
   local jsn = vim.json.decode(resp.body)
   jsn.sources = vim
-    .iter(jsn.sources)
-    :map(function(source)
-      local uri = M.to_local_uri(source.uri)
-      return vim.tbl_deep_extend("force", source, { uri = uri })
-    end)
-    :totable()
+      .iter(jsn.sources)
+      :map(function(source)
+        local uri = M.to_local_uri(source.uri)
+        return vim.tbl_deep_extend("force", source, { uri = uri })
+      end)
+      :totable()
   return jsn, nil
 end
 
@@ -388,12 +449,12 @@ function M.get_resources()
   end
   local jsn = vim.json.decode(resp.body)
   jsn.resources = vim
-    .iter(jsn.resources)
-    :map(function(resource)
-      local uri = M.to_local_uri(resource.uri)
-      return vim.tbl_deep_extend("force", resource, { uri = uri })
-    end)
-    :totable()
+      .iter(jsn.resources)
+      :map(function(resource)
+        local uri = M.to_local_uri(resource.uri)
+        return vim.tbl_deep_extend("force", resource, { uri = uri })
+      end)
+      :totable()
   return jsn
 end
 
