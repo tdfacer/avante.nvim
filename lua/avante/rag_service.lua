@@ -115,7 +115,7 @@ function M.launch_rag_service(cb)
     local mount_args = M.get_docker_mount_args()
 
     local cmd_ = string.format(
-      "docker run -d --network=host --name %s -v %s:/data %s -e ALLOW_RESET=TRUE -e DATA_DIR=/data -e RAG_PROVIDER=%s -e %s_API_KEY=%s -e %s_API_BASE=%s -e RAG_LLM_MODEL=%s -e RAG_EMBED_MODEL=%s %s %s",
+      "docker run --platform=linux/amd64 -d --network=host --name %s -v %s:/data -v %s:/host:ro -e ALLOW_RESET=TRUE -e DATA_DIR=/data -e RAG_PROVIDER=%s -e %s_API_KEY=%s -e %s_API_BASE=%s -e RAG_LLM_MODEL=%s -e RAG_EMBED_MODEL=%s %s %s",
       container_name,
       data_path,
       mount_args,
